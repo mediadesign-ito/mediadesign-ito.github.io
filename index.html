@@ -2,8 +2,8 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Routing Fix Version</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Simple Evacuation Map</title>
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -11,68 +11,119 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
     
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
+        body { margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; }
+        
+        /* 地図を画面いっぱいに */
         #map { width: 100%; height: 100vh; z-index: 1; }
 
-        #controls {
-            position: absolute; top: 10px; left: 10px; z-index: 1000;
-            background: white; padding: 15px; border-radius: 4px;
-            box-shadow: 0 1px 5px rgba(0,0,0,0.65);
-            max-width: 300px; width: 100%; box-sizing: border-box;
+        /* 上部のコンパクトなコントロールバー */
+        #top-bar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            display: flex; /* 横並びにする設定 */
+            align-items: center; /* 上下中央揃え */
+            gap: 15px; /* タイトルとボタンの間隔 */
         }
 
+        /* タイトル設定 */
+        h1 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: #333;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        /* ボタン設定 */
+        #btn-current {
+            background-color: #d32f2f;
+            color: white;
+            border: none;
+            padding: 6px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        #btn-current:hover { background-color: #b71c1c; }
+        #btn-current:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        /* 右側のリストパネル（検索結果） */
         #results-panel {
-            position: absolute; top: 10px; right: 10px; z-index: 1000;
-            background: white; border-radius: 4px;
-            box-shadow: 0 1px 5px rgba(0,0,0,0.65);
-            width: 320px; max-height: 90vh; overflow-y: auto;
-            display: none;
+            position: absolute;
+            top: 60px; /* バーの下に配置 */
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.3);
+            width: 300px;
+            max-height: 80vh;
+            overflow-y: auto;
+            display: none; /* 最初は非表示 */
         }
 
-        .list-item { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; }
-        .list-item:hover { background-color: #e3f2fd; }
-        .list-header { font-weight: bold; color: #0078A8; display: flex; justify-content: space-between; }
-        .list-address { font-size: 0.85rem; color: #555; margin-left: 10px; margin-top: 4px; }
+        /* リストアイテムのスタイル */
+        .list-item { padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; }
+        .list-item:hover { background-color: #f5f5f5; }
+        .list-header { font-weight: bold; font-size: 0.95rem; color: #0078A8; display: flex; justify-content: space-between; }
+        .list-address { font-size: 0.8rem; color: #666; margin-top: 3px; }
         
-        button {
-            background-color: #d32f2f; color: white; border: none;
-            padding: 10px; border-radius: 4px; cursor: pointer; width: 100%; font-weight: bold;
-        }
-        button:disabled { background-color: #ccc; }
-        
-        /* 経路案内（右折・左折などの文字）を隠す設定 */
+        /* ルート案内文字を非表示 */
         .leaflet-routing-container { display: none; }
 
-        @media (max-width: 700px) {
-            #results-panel { top: auto; bottom: 0; left: 0; right: 0; width: 100%; max-height: 40vh; }
+        /* スマホ用レイアウト */
+        @media (max-width: 600px) {
+            #top-bar {
+                left: 10px; right: 10px; /* 横幅いっぱいにしないが、端まで広げる */
+                justify-content: space-between;
+            }
+            #results-panel {
+                top: auto; bottom: 0; left: 0; right: 0;
+                width: 100%; max-height: 40vh;
+                border-radius: 15px 15px 0 0; /* 角丸を上に */
+            }
         }
     </style>
 </head>
 <body>
 
-    <div id="controls">
-        <h3>避難所マップ</h3>
-        <p style="font-size:0.9rem;">CSV読込: <span id="status-text">待機中...</span></p>
-        <button id="btn-nearest" disabled>📍 現在地を取得＆リスト表示</button>
+    <!-- 1行だけのコンパクトな上部バー -->
+    <div id="top-bar">
+        <h1>避難所マップ</h1>
+        <button id="btn-current" disabled>現在地</button>
     </div>
 
+    <!-- 検索結果リスト（最初は非表示） -->
     <div id="results-panel">
-        <div style="padding:10px; font-weight:bold; background:#f5f5f5;">近隣スポット Top 5</div>
         <div id="list-container"></div>
     </div>
 
+    <!-- 地図 -->
     <div id="map"></div>
 
+    <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
 
     <script>
-        // ★CSVファイル名（同じフォルダに置いてください）
+        // ★CSVファイル名
         const CSV_FILE_PATH = 'data.csv';
 
         // 地図初期化
-        const map = L.map('map').setView([35.681236, 139.767125], 5);
+        const map = L.map('map', {zoomControl: false}).setView([35.681236, 139.767125], 5);
+        
+        // ズームコントロールを右下に移動（左上を空けるため）
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
         L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
             attribution: '地理院タイル', minZoom: 2, maxZoom: 18
         }).addTo(map);
@@ -89,11 +140,8 @@
             iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
         });
 
-        // 1. ページ読み込み時にCSV取得
+        // 1. ページ読み込み時にCSVを裏側で取得
         window.addEventListener('load', () => {
-            const status = document.getElementById('status-text');
-            status.innerText = "読込中...";
-            
             Papa.parse(CSV_FILE_PATH, {
                 download: true, header: true, skipEmptyLines: true,
                 complete: (results) => {
@@ -107,30 +155,26 @@
                     })).filter(d => !isNaN(d.lat) && !isNaN(d.lng));
 
                     if(allCsvData.length > 0) {
-                        status.innerText = "完了 (" + allCsvData.length + "件)";
-                        status.style.color = "green";
-                        document.getElementById('btn-nearest').disabled = false;
-                        displayMarkers(allCsvData);
+                        // データ読み込み完了したらボタンを有効化
+                        document.getElementById('btn-current').disabled = false;
+                        displayMarkers(allCsvData); // 全件ピンだけ立てておく
                         map.fitBounds(allCsvData.map(d => [d.lat, d.lng]));
-                    } else {
-                        status.innerText = "データなし";
                     }
                 },
                 error: (err) => {
                     console.error(err);
-                    status.innerText = "エラー";
-                    status.style.color = "red";
-                    alert("CSV読み込み失敗: ローカルサーバー経由で開いていますか？");
+                    alert("データ読み込みエラー: ローカルサーバーを使用してください");
                 }
             });
         });
 
-        // 2. 現在地検索ボタン
-        document.getElementById('btn-nearest').addEventListener('click', function() {
-            if(!navigator.geolocation) return alert("位置情報非対応");
+        // 2. 「現在地」ボタン処理
+        document.getElementById('btn-current').addEventListener('click', function() {
+            if(!navigator.geolocation) return alert("位置情報が使えません");
             
             const btn = this;
-            btn.innerText = "検索中...";
+            const originalText = btn.innerText;
+            btn.innerText = "取得中...";
             btn.disabled = true;
 
             navigator.geolocation.getCurrentPosition(
@@ -144,7 +188,7 @@
                     currentLocLayer.clearLayers();
                     L.marker([lat, lng], {icon: redIcon}).bindPopup("<b>現在地</b>").addTo(currentLocLayer).openPopup();
 
-                    // 距離計算 & ソート
+                    // 距離計算 & 近い順に5件抽出
                     const nearData = allCsvData.map(d => {
                         d.distance = currentLatLng.distanceTo([d.lat, d.lng]);
                         return d;
@@ -154,22 +198,23 @@
                     displayMarkers(nearData);
                     updateList(nearData);
                     
-                    // ズーム
+                    // ズーム調整
                     const bounds = L.latLngBounds([currentLatLng]);
                     nearData.forEach(d => bounds.extend([d.lat, d.lng]));
                     map.fitBounds(bounds, {padding: [50,50]});
 
-                    btn.innerText = "📍 現在地を取得＆リスト表示";
+                    btn.innerText = originalText;
                     btn.disabled = false;
                 },
                 (err) => {
-                    alert("位置情報エラー: " + err.message);
-                    btn.innerText = "📍 現在地を取得＆リスト表示";
+                    alert("位置情報を取得できませんでした");
+                    btn.innerText = originalText;
                     btn.disabled = false;
                 }
             );
         });
 
+        // マーカー表示
         function displayMarkers(list) {
             csvLayer.clearLayers();
             list.forEach(d => {
@@ -180,67 +225,58 @@
             });
         }
 
+        // リスト更新
         function updateList(list) {
             const container = document.getElementById('list-container');
+            const panel = document.getElementById('results-panel');
+            
             container.innerHTML = "";
-            document.getElementById('results-panel').style.display = 'block';
+            // ヘッダーを追加
+            const headerDiv = document.createElement('div');
+            headerDiv.style.padding = "10px";
+            headerDiv.style.backgroundColor = "#f9f9f9";
+            headerDiv.style.fontWeight = "bold";
+            headerDiv.style.borderBottom = "1px solid #ddd";
+            headerDiv.innerText = "近くの避難所 (Top 5)";
+            container.appendChild(headerDiv);
+
+            panel.style.display = 'block';
 
             list.forEach((d, i) => {
                 const dist = d.distance >= 1000 ? (d.distance/1000).toFixed(1)+"km" : Math.round(d.distance)+"m";
                 const div = document.createElement('div');
                 div.className = 'list-item';
                 div.innerHTML = `
-                    <div class="list-header"><span>${i+1}. ${d.name}</span><span style="font-size:0.8rem; background:#eee; padding:2px 5px; border-radius:4px;">${dist}</span></div>
+                    <div class="list-header">
+                        <span>${i+1}. ${d.name}</span>
+                        <span style="font-size:0.8rem; background:#eee; padding:2px 6px; border-radius:10px; height:fit-content;">${dist}</span>
+                    </div>
                     <div class="list-address">${d.address}</div>
                 `;
-                // クリック時の動作
+                
                 div.addEventListener('click', () => {
                     map.flyTo([d.lat, d.lng], 16);
                     if(d.markerObject) d.markerObject.openPopup();
-                    
-                    // ★経路検索の実行
-                    if(currentUserLocation) {
-                        drawRoute(currentUserLocation, d);
-                    } else {
-                        alert("現在地が取得されていません");
-                    }
+                    if(currentUserLocation) drawRoute(currentUserLocation, d);
                 });
                 container.appendChild(div);
             });
         }
 
-        // 3. ルート描画関数（エラーハンドリング強化版）
+        // ルート描画
         function drawRoute(start, end) {
-            // 既存のルートがあれば消す
-            if (routingControl) {
-                map.removeControl(routingControl);
-            }
-
-            // ルート検索の実行
+            if (routingControl) map.removeControl(routingControl);
+            
             routingControl = L.Routing.control({
-                waypoints: [
-                    L.latLng(start.lat, start.lng),
-                    L.latLng(end.lat, end.lng)
-                ],
-                // OSRMサーバーを明示的に指定
-                router: L.Routing.osrmv1({
-                    serviceUrl: 'https://router.project-osrm.org/route/v1'
-                }),
-                // 線のスタイル（青色、不透明度0.6、太さ6px）
-                lineOptions: {
-                    styles: [{color: 'red', opacity: 0.8, weight: 8}]
-                },
-                // マーカーは独自に表示しているのでルート用マーカーは非表示
-                createMarker: function() { return null; },
-                addWaypoints: false,
-                draggableWaypoints: false,
-                fitSelectedRoutes: true, // ルート全体が見えるように自動ズーム
-                showAlternatives: false
+                waypoints: [ L.latLng(start.lat, start.lng), L.latLng(end.lat, end.lng) ],
+                router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
+                lineOptions: { styles: [{color: '#0066ff', opacity: 0.7, weight: 6}] },
+                createMarker: () => null,
+                addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: true
             })
-            .on('routingerror', function(e) {
-                // ★エラーが発生した場合の通知
-                console.error('Routing Error:', e);
-                alert('経路の取得に失敗しました。\n\n考えられる原因:\n・サーバー(OSRM)が混雑している\n・距離が遠すぎる\n・海をまたいでいる');
+            .on('routingerror', (e) => {
+                console.error(e);
+                alert('ルートを検索できませんでした(サーバー混雑等)');
             })
             .addTo(map);
         }
