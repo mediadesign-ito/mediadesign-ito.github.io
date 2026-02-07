@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nearest 5 List Viewer</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        
+        #map {
+            width: 100%;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        /* 左側のコントロールパネル */
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.65);
+            max-width: 300px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        /* 右側の結果リストパネル */
+        #results-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.65);
+            width: 320px;
+            max-height: 90vh; /* 画面からはみ出ないように */
+            overflow-y: auto; /* スクロール可能に */
+            display: none; /* 最初は非表示 */
+        }
+
+        /* リストアイテムのスタイル */
+        .list-item {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .list-item:last-child {
+            border-bottom: none;
+        }
+        .list-item:hover {
+            background-color: #f5f5f5;
+        }
+
+        /* リスト内の文字スタイル */
+        .list-header {
+            font-weight: bold;
+            font-size: 1rem;
+            color: #0078A8;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between; /* 名称と距離を左右に配置 */
+        }
+        .list-address {
+            font-size: 0.85rem;
+            color: #555;
+            margin-left: 1.2rem; /* 番号の分だけインデント */
+        }
+        .list-dist {
+            font-size: 0.8rem;
+            color: #d32f2f;
+            background: #ffebee;
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            margin-left: 8px;
+        }
+
+        /* ボタン等 */
+        .note { font-size: 0.8rem; color: #666; margin-bottom: 10px; }
+        button {
+            background-color: #d32f2f; color: white; border: none;
+            padding: 10px 15px; border-radius: 4px; cursor: pointer;
+            font-size: 0.95rem; width: 100%; font-weight: bold;
+        }
+        button:hover { background-color: #b71c1c; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        
+        /* スマホ対応: 画面が狭いときはリストを下に配置 */
+        @media (max-width: 700px) {
+            #results-panel {
+                top: auto;
+                bottom: 0;
+                right: 0;
+                left: 0;
+                width: 100%;
+                max-height: 40vh;
+                border-radius: 10px 10px 0 0;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 操作パネル -->
+    <div id="controls">
+        <label for="csv-file"><b>1. CSV読み込み:</b></label>
+        <input type="file" id="csv-file" accept=".csv" style="margin-top:5px; margin-bottom:10px; width:100%;">
+        <hr style="border:0; border-top:1px solid #eee; margin:10px 0;">
+        <b>2. 近隣検索:</b>
+        <div class="note">※現在地から近い5件を表示します</div>
+        <button id="btn-nearest">📍 現在地を取得＆リスト表示</button>
+    </div>
+
+    <!-- 結果リストパネル（最初は非表示） -->
+    <div id="results-panel">
+        <div style="padding:10px; background:#f9f9f9; border-bottom:1px solid #ddd; font-weight:bold;">
+            近隣スポット (Top 5)
+        </div>
+        <div id="list-container">
+            <!-- ここにJavaScriptでリストが追加されます -->
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- Leaflet JS & PapaParse -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <script>
+        // --- 1. 地図の初期化 ---
+        const map = L.map('map').setView([35.681236, 139.767125], 5);
+
+        L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
+            attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>',
+            minZoom: 2, maxZoom: 18
+        }).addTo(map);
+
+        let csvLayer = L.layerGroup().addTo(map);
+        let currentLocLayer = L.layerGroup().addTo(map);
+        let allCsvData = [];
+
+        // 赤いマーカー（現在地用）
+        const redIcon = new L.Icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+        });
+
+        // --- 2. CSV読み込み ---
+        document.getElementById('csv-file').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // リセット
+            csvLayer.clearLayers();
+            currentLocLayer.clearLayers();
+            allCsvData = [];
+            document.getElementById('results-panel').style.display = 'none';
+
+            Papa.parse(file, {
+                header: true, skipEmptyLines: true,
+                complete: function(results) {
+                    const data = results.data;
+                    data.forEach((row) => {
+                        const lat = parseFloat(row['緯度'] || row['latitude'] || row['lat']);
+                        const lng = parseFloat(row['経度'] || row['longitude'] || row['lng']);
+                        if (!isNaN(lat) && !isNaN(lng)) {
+                            allCsvData.push({
+                                lat: lat, lng: lng,
+                                name: row['名称'] || row['施設名'] || row['Name'] || '',
+                                address: row['住所'] || row['所在地'] || row['Address'] || '',
+                                disaster: row['避難対象の災害'] || row['災害種別'] || ''
+                            });
+                        }
+                    });
+
+                    if (allCsvData.length > 0) {
+                        displayMarkers(allCsvData); // 全件表示
+                        const latLngs = allCsvData.map(d => [d.lat, d.lng]);
+                        map.fitBounds(latLngs);
+                    } else {
+                        alert("有効なデータがありませんでした。");
+                    }
+                }
+            });
+        });
+
+        // --- 3. 現在地取得とリスト表示処理 ---
+        document.getElementById('btn-nearest').addEventListener('click', function() {
+            if (allCsvData.length === 0) { alert("先にCSVを読み込んでください"); return; }
+            if (!navigator.geolocation) { alert("位置情報非対応です"); return; }
+
+            const btn = this;
+            btn.innerHTML = "検索中...";
+            btn.disabled = true;
+
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const currentLat = position.coords.latitude;
+                    const currentLng = position.coords.longitude;
+                    const currentLatLng = L.latLng(currentLat, currentLng);
+
+                    // 現在地マーカー
+                    currentLocLayer.clearLayers();
+                    L.marker([currentLat, currentLng], {icon: redIcon})
+                        .bindPopup("<b>あなたの現在地</b>")
+                        .addTo(currentLocLayer)
+                        .openPopup();
+
+                    // 距離計算とソート
+                    const dataWithDistance = allCsvData.map(point => {
+                        point.distance = currentLatLng.distanceTo(L.latLng(point.lat, point.lng));
+                        return point;
+                    });
+                    
+                    dataWithDistance.sort((a, b) => a.distance - b.distance);
+                    const nearest5 = dataWithDistance.slice(0, 5);
+
+                    // 地図更新
+                    displayMarkers(nearest5);
+                    
+                    // ★リスト更新
+                    updateResultList(nearest5);
+
+                    // ズーム調整
+                    const bounds = L.latLngBounds([currentLatLng]);
+                    nearest5.forEach(d => bounds.extend([d.lat, d.lng]));
+                    map.fitBounds(bounds, {padding: [50, 50]});
+
+                    btn.innerHTML = "📍 現在地を取得＆リスト表示";
+                    btn.disabled = false;
+                },
+                function(error) {
+                    alert("位置情報取得エラー");
+                    btn.innerHTML = "📍 現在地を取得＆リスト表示";
+                    btn.disabled = false;
+                }
+            );
+        });
+
+        // --- 4. 地図へのマーカー表示 ---
+        function displayMarkers(points) {
+            csvLayer.clearLayers();
+            points.forEach((point) => {
+                // マーカー作成
+                const marker = L.marker([point.lat, point.lng]);
+                
+                // ポップアップ内容
+                let popupHTML = `<b>${point.name}</b><br>住所: ${point.address}`;
+                if (point.disaster) popupHTML += `<br>災害: ${point.disaster}`;
+                
+                marker.bindPopup(popupHTML);
+                
+                // マーカーオブジェクトをデータに関連付けておく（リストクリック時のため）
+                point.markerObject = marker; 
+                
+                marker.addTo(csvLayer);
+            });
+        }
+
+        // --- 5. リスト生成関数 (要望のスタイル) ---
+        function updateResultList(points) {
+            const panel = document.getElementById('results-panel');
+            const container = document.getElementById('list-container');
+            
+            container.innerHTML = ""; // クリア
+            panel.style.display = 'block'; // 表示
+
+            points.forEach((point, index) => {
+                // 距離のフォーマット
+                let distStr = "";
+                if (point.distance >= 1000) {
+                    distStr = (point.distance / 1000).toFixed(1) + " km";
+                } else {
+                    distStr = Math.round(point.distance) + " m";
+                }
+
+                // リストアイテムの作成
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'list-item';
+                
+                // HTML構造: 
+                // 1 名称 500m
+                // 住所
+                itemDiv.innerHTML = `
+                    <div class="list-header">
+                        <span>${index + 1}. ${point.name}</span>
+                        <span class="list-dist">${distStr}</span>
+                    </div>
+                    <div class="list-address">${point.address}</div>
+                `;
+
+                // クリックイベント: 地図上のマーカーへ移動してポップアップ
+                itemDiv.addEventListener('click', () => {
+                    map.flyTo([point.lat, point.lng], 16); // アニメーション移動
+                    if (point.markerObject) {
+                        point.markerObject.openPopup();
+                    }
+                });
+
+                container.appendChild(itemDiv);
+            });
+        }
+    </script>
+</body>
+</html>
