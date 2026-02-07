@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Simple Evacuation Map</title>
+    <title>Slide Panel Map Viewer</title>
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -11,119 +11,152 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
     
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; }
+        body { margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; background: #f0f0f0; }
         
-        /* 地図を画面いっぱいに */
+        /* 地図設定 */
         #map { width: 100%; height: 100vh; z-index: 1; }
 
-        /* 上部のコンパクトなコントロールバー */
+        /* 上部バー */
         #top-bar {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            z-index: 1000;
-            background: white;
-            padding: 8px 12px;
-            border-radius: 4px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-            display: flex; /* 横並びにする設定 */
-            align-items: center; /* 上下中央揃え */
-            gap: 15px; /* タイトルとボタンの間隔 */
+            position: absolute; top: 10px; left: 10px; z-index: 1000;
+            background: white; padding: 8px 12px;
+            border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            display: flex; align-items: center; gap: 15px;
         }
-
-        /* タイトル設定 */
-        h1 {
-            margin: 0;
-            font-size: 1.1rem;
-            color: #333;
-            font-weight: bold;
-            white-space: nowrap;
-        }
-
-        /* ボタン設定 */
+        h1 { margin: 0; font-size: 1.1rem; color: #333; font-weight: bold; white-space: nowrap; }
         #btn-current {
-            background-color: #d32f2f;
-            color: white;
-            border: none;
-            padding: 6px 15px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-            font-weight: bold;
-            white-space: nowrap;
+            background-color: #d32f2f; color: white; border: none;
+            padding: 6px 15px; border-radius: 4px; cursor: pointer;
+            font-size: 0.9rem; font-weight: bold; white-space: nowrap;
         }
         #btn-current:hover { background-color: #b71c1c; }
         #btn-current:disabled { background-color: #ccc; cursor: not-allowed; }
 
-        /* 右側のリストパネル（検索結果） */
+        /* --- スライドパネル全体 --- */
         #results-panel {
             position: absolute;
-            top: 60px; /* バーの下に配置 */
-            right: 10px;
-            z-index: 1000;
+            z-index: 2000; /* 地図よりかなり手前 */
             background: white;
-            border-radius: 4px;
-            box-shadow: 0 1px 5px rgba(0,0,0,0.3);
-            width: 300px;
-            max-height: 80vh;
-            overflow-y: auto;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
             display: none; /* 最初は非表示 */
+            transition: transform 0.3s ease-in-out, height 0.3s ease-in-out;
+            display: flex;
+            flex-direction: column;
         }
 
-        /* リストアイテムのスタイル */
-        .list-item { padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; }
-        .list-item:hover { background-color: #f5f5f5; }
-        .list-header { font-weight: bold; font-size: 0.95rem; color: #0078A8; display: flex; justify-content: space-between; }
-        .list-address { font-size: 0.8rem; color: #666; margin-top: 3px; }
-        
-        /* ルート案内文字を非表示 */
-        .leaflet-routing-container { display: none; }
-
-        /* スマホ用レイアウト */
-        @media (max-width: 600px) {
-            #top-bar {
-                left: 10px; right: 10px; /* 横幅いっぱいにしないが、端まで広げる */
-                justify-content: space-between;
+        /* PC表示: 右上にフロート表示 */
+        @media (min-width: 601px) {
+            #results-panel {
+                top: 60px; right: 10px;
+                width: 320px;
+                max-height: 80vh;
+                border-radius: 4px;
             }
+            /* PCで閉じたときはリスト部分を隠す */
+            #results-panel.closed #list-container {
+                display: none;
+            }
+        }
+
+        /* スマホ表示: 下部に固定 */
+        @media (max-width: 600px) {
             #results-panel {
                 top: auto; bottom: 0; left: 0; right: 0;
-                width: 100%; max-height: 40vh;
-                border-radius: 15px 15px 0 0; /* 角丸を上に */
+                width: 100%;
+                height: 50vh; /* 開いたときの高さ */
+                border-radius: 15px 15px 0 0; /* 上だけ丸く */
+                transform: translateY(0); /* 通常位置 */
+            }
+            /* スマホで閉じたときは下にスライドして隠す */
+            #results-panel.closed {
+                /* ヘッダーの高さ(約45px)だけ残して下に埋める */
+                transform: translateY(calc(100% - 45px));
             }
         }
+
+        /* パネルのヘッダー（クリックして開閉する部分） */
+        #panel-header {
+            padding: 12px 15px;
+            background: #f9f9f9;
+            border-bottom: 1px solid #ddd;
+            font-weight: bold;
+            color: #333;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            /* スマホ用の角丸対応 */
+            border-radius: 4px 4px 0 0; 
+        }
+        @media (max-width: 600px) {
+            #panel-header { border-radius: 15px 15px 0 0; }
+        }
+
+        /* 開閉アイコン */
+        #toggle-icon {
+            transition: transform 0.3s;
+            font-size: 0.8rem;
+            color: #666;
+        }
+        /* 閉じたときはアイコンを回転 */
+        #results-panel.closed #toggle-icon {
+            transform: rotate(180deg);
+        }
+
+        /* リスト部分（スクロール可能エリア） */
+        #list-container {
+            flex: 1; /* 残りの高さを埋める */
+            overflow-y: auto;
+            background: #fff;
+        }
+
+        /* リストアイテム */
+        .list-item {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .list-item:hover { background-color: #f0f8ff; }
+
+        .list-header { font-weight: bold; font-size: 0.95rem; color: #0078A8; display: flex; justify-content: space-between; }
+        .list-dist { font-size: 0.8rem; background: #eee; padding: 2px 6px; border-radius: 10px; color: #333; }
+        .list-detail { font-size: 0.85rem; color: #555; margin-top: 4px; line-height: 1.4; }
+
+        .leaflet-routing-container { display: none; }
     </style>
 </head>
 <body>
 
-    <!-- 1行だけのコンパクトな上部バー -->
+    <!-- 上部バー -->
     <div id="top-bar">
         <h1>避難所マップ</h1>
         <button id="btn-current" disabled>現在地</button>
     </div>
 
-    <!-- 検索結果リスト（最初は非表示） -->
-    <div id="results-panel">
-        <div id="list-container"></div>
+    <!-- 全体開閉式パネル -->
+    <div id="results-panel" class="closed" style="display:none;">
+        <!-- ヘッダー（ここをクリックで開閉） -->
+        <div id="panel-header">
+            <span id="header-title">近くの避難所 (Top 5)</span>
+            <span id="toggle-icon">▼</span>
+        </div>
+        <!-- リスト中身 -->
+        <div id="list-container">
+            <!-- JSで追加 -->
+        </div>
     </div>
 
-    <!-- 地図 -->
     <div id="map"></div>
 
-    <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
 
     <script>
-        // ★CSVファイル名
         const CSV_FILE_PATH = 'data.csv';
 
-        // 地図初期化
         const map = L.map('map', {zoomControl: false}).setView([35.681236, 139.767125], 5);
-        
-        // ズームコントロールを右下に移動（左上を空けるため）
         L.control.zoom({ position: 'bottomright' }).addTo(map);
-
         L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
             attribution: '地理院タイル', minZoom: 2, maxZoom: 18
         }).addTo(map);
@@ -140,13 +173,12 @@
             iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
         });
 
-        // 1. ページ読み込み時にCSVを裏側で取得
+        // 1. CSV読み込み
         window.addEventListener('load', () => {
             Papa.parse(CSV_FILE_PATH, {
                 download: true, header: true, skipEmptyLines: true,
                 complete: (results) => {
-                    const data = results.data;
-                    allCsvData = data.map(row => ({
+                    allCsvData = results.data.map(row => ({
                         lat: parseFloat(row['緯度'] || row['latitude'] || row['lat']),
                         lng: parseFloat(row['経度'] || row['longitude'] || row['lng']),
                         name: row['名称'] || row['施設名'] || '',
@@ -155,22 +187,17 @@
                     })).filter(d => !isNaN(d.lat) && !isNaN(d.lng));
 
                     if(allCsvData.length > 0) {
-                        // データ読み込み完了したらボタンを有効化
                         document.getElementById('btn-current').disabled = false;
-                        displayMarkers(allCsvData); // 全件ピンだけ立てておく
-                        map.fitBounds(allCsvData.map(d => [d.lat, d.lng]));
+                        displayMarkers(allCsvData);
                     }
                 },
-                error: (err) => {
-                    console.error(err);
-                    alert("データ読み込みエラー: ローカルサーバーを使用してください");
-                }
+                error: () => alert("CSV読込エラー: サーバー経由で開いてください")
             });
         });
 
-        // 2. 「現在地」ボタン処理
+        // 2. 現在地検索
         document.getElementById('btn-current').addEventListener('click', function() {
-            if(!navigator.geolocation) return alert("位置情報が使えません");
+            if(!navigator.geolocation) return alert("位置情報不可");
             
             const btn = this;
             const originalText = btn.innerText;
@@ -184,101 +211,98 @@
                     currentUserLocation = { lat, lng };
                     const currentLatLng = L.latLng(lat, lng);
 
-                    // 現在地ピン
                     currentLocLayer.clearLayers();
                     L.marker([lat, lng], {icon: redIcon}).bindPopup("<b>現在地</b>").addTo(currentLocLayer).openPopup();
 
-                    // 距離計算 & 近い順に5件抽出
                     const nearData = allCsvData.map(d => {
                         d.distance = currentLatLng.distanceTo([d.lat, d.lng]);
                         return d;
                     }).sort((a,b) => a.distance - b.distance).slice(0, 5);
 
-                    // 表示更新
                     displayMarkers(nearData);
                     updateList(nearData);
                     
-                    // ズーム調整
                     const bounds = L.latLngBounds([currentLatLng]);
                     nearData.forEach(d => bounds.extend([d.lat, d.lng]));
-                    map.fitBounds(bounds, {padding: [50,50]});
+                    map.fitBounds(bounds, {padding: [50, 50]});
 
                     btn.innerText = originalText;
                     btn.disabled = false;
                 },
                 (err) => {
-                    alert("位置情報を取得できませんでした");
+                    alert("位置情報取得エラー");
                     btn.innerText = originalText;
                     btn.disabled = false;
                 }
             );
         });
 
-        // マーカー表示
         function displayMarkers(list) {
             csvLayer.clearLayers();
             list.forEach(d => {
                 const marker = L.marker([d.lat, d.lng]);
-                marker.bindPopup(`<b>${d.name}</b><br>${d.address}<br>${d.disaster}`);
+                marker.bindPopup(`<b>${d.name}</b><br>${d.address}`);
                 d.markerObject = marker;
                 marker.addTo(csvLayer);
             });
         }
 
-        // リスト更新
+        // 3. パネル開閉ロジック
+        const panel = document.getElementById('results-panel');
+        const header = document.getElementById('panel-header');
+        
+        // ヘッダーをクリックしたらクラスを切り替える
+        header.addEventListener('click', () => {
+            panel.classList.toggle('closed');
+        });
+
+        // リスト更新関数
         function updateList(list) {
             const container = document.getElementById('list-container');
-            const panel = document.getElementById('results-panel');
-            
             container.innerHTML = "";
-            // ヘッダーを追加
-            const headerDiv = document.createElement('div');
-            headerDiv.style.padding = "10px";
-            headerDiv.style.backgroundColor = "#f9f9f9";
-            headerDiv.style.fontWeight = "bold";
-            headerDiv.style.borderBottom = "1px solid #ddd";
-            headerDiv.innerText = "近くの避難所 (Top 5)";
-            container.appendChild(headerDiv);
-
-            panel.style.display = 'block';
+            
+            // パネルを表示し、自動で開く（closedクラスを外す）
+            panel.style.display = 'flex';
+            panel.classList.remove('closed');
 
             list.forEach((d, i) => {
                 const dist = d.distance >= 1000 ? (d.distance/1000).toFixed(1)+"km" : Math.round(d.distance)+"m";
+                
                 const div = document.createElement('div');
                 div.className = 'list-item';
                 div.innerHTML = `
                     <div class="list-header">
                         <span>${i+1}. ${d.name}</span>
-                        <span style="font-size:0.8rem; background:#eee; padding:2px 6px; border-radius:10px; height:fit-content;">${dist}</span>
+                        <span class="list-dist">${dist}</span>
                     </div>
-                    <div class="list-address">${d.address}</div>
+                    <div class="list-detail">
+                        ${d.address}<br>
+                        <span style="color:#d32f2f;">${d.disaster}</span>
+                    </div>
                 `;
                 
                 div.addEventListener('click', () => {
+                    // クリックしたらPC/スマホともに地図が見やすいように自動でパネルを閉じる（任意）
+                    // panel.classList.add('closed'); 
+                    
                     map.flyTo([d.lat, d.lng], 16);
                     if(d.markerObject) d.markerObject.openPopup();
                     if(currentUserLocation) drawRoute(currentUserLocation, d);
                 });
+                
                 container.appendChild(div);
             });
         }
 
-        // ルート描画
         function drawRoute(start, end) {
             if (routingControl) map.removeControl(routingControl);
-            
             routingControl = L.Routing.control({
                 waypoints: [ L.latLng(start.lat, start.lng), L.latLng(end.lat, end.lng) ],
                 router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
                 lineOptions: { styles: [{color: '#0066ff', opacity: 0.7, weight: 6}] },
                 createMarker: () => null,
                 addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: true
-            })
-            .on('routingerror', (e) => {
-                console.error(e);
-                alert('ルートを検索できませんでした(サーバー混雑等)');
-            })
-            .addTo(map);
+            }).addTo(map);
         }
     </script>
 </body>
