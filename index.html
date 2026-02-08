@@ -21,16 +21,23 @@
             position: absolute; top: 10px; left: 10px; z-index: 1000;
             background: white; padding: 8px 12px;
             border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-            display: flex; align-items: center; gap: 15px;
+            display: flex; align-items: center; gap: 10px;
         }
-        h1 { margin: 0; font-size: 1.1rem; color: #333; font-weight: bold; white-space: nowrap; }
+        h1 { margin: 0; font-size: 1.1rem; color: #333; font-weight: bold; white-space: nowrap; margin-right: 5px; }
         
         #btn-current {
             background-color: #d32f2f; color: white; border: none;
-            padding: 6px 15px; border-radius: 4px; cursor: pointer;
+            padding: 6px 12px; border-radius: 4px; cursor: pointer;
             font-size: 0.9rem; font-weight: bold; white-space: nowrap;
         }
         #btn-current:hover { background-color: #b71c1c; }
+
+        #btn-help {
+            background-color: #0078A8; color: white; border: none;
+            padding: 6px 12px; border-radius: 4px; cursor: pointer;
+            font-size: 0.9rem; font-weight: bold; white-space: nowrap;
+        }
+        #btn-help:hover { background-color: #005f85; }
 
         /* --- スタート画面（モーダル） --- */
         #welcome-modal {
@@ -81,20 +88,16 @@
             display: flex; flex-direction: column;
         }
 
-        /* PC表示: 左上（トップバーの下） */
         @media (min-width: 601px) {
             #results-panel {
-                top: 80px; 
-                left: 10px; /* ここを right: 10px から変更しました */
-                width: 320px; 
-                max-height: 80vh; 
-                border-radius: 4px;
+                top: 80px; left: 10px; width: 320px; max-height: 80vh; border-radius: 4px;
             }
             #results-panel.closed #list-container { display: none; }
         }
 
-        /* スマホ表示: 下部固定 */
         @media (max-width: 600px) {
+            #top-bar { gap: 5px; }
+            h1 { font-size: 1rem; }
             #results-panel {
                 top: auto; bottom: 0; left: 0; right: 0; width: 100%; height: 50vh;
                 border-radius: 15px 15px 0 0; transform: translateY(0);
@@ -126,7 +129,7 @@
 </head>
 <body>
 
-    <!-- ★スタート画面（モーダル） -->
+    <!-- スタート画面（モーダル） -->
     <div id="welcome-modal">
         <div class="modal-content">
             <div class="modal-title">避難所はどこだ？</div>
@@ -146,8 +149,8 @@
                     <ul>
                         <li>位置情報の利用を許可してください。</li>
                         <li>表示される距離は目安です。</li>
-                        <li>経路情報は機械的に計算されたものです。必ずしも最短経路ではありません。</li>
-                        <li>実際の道路状況に従って避難してください。</li>
+                        <li>経路情報はオープンソースのOSRMデモサーバーを使用しています。</li>
+                        <li>示される経路は必ずしも最短ではありません。実際の道路状況に従って避難してください。</li>
                     </ul>
                 </div>
             </div>
@@ -156,11 +159,11 @@
                 <div class="modal-h3">出典・ライセンス</div>
                 <div class="modal-text" style="font-size: 0.85rem; color: #666;">
                     出典：このコンテンツは、仙台市オープンデータポータルを利用しています<br>
-                    ライセンス：CC ライセンス 表示 4.0 国際
+                    ライセンス：CC ライセンス 表示 4.0 国際<br>
+                    制作：メディアデザイン <a href="https://mediadesign.jp" target="_blank" style="color: #666;">https://mediadesign.jp</a>
                 </div>
             </div>
 
-            <!-- 同意ボタン（HTMLで直接制御） -->
             <button id="btn-agree" onclick="document.getElementById('welcome-modal').style.display='none';">同意して利用を開始する</button>
         </div>
     </div>
@@ -169,6 +172,7 @@
     <div id="top-bar">
         <h1>避難所はどこだ？</h1>
         <button id="btn-current">現在地</button>
+        <button id="btn-help">ヘルプ</button>
     </div>
 
     <!-- 結果表示パネル -->
@@ -189,11 +193,19 @@
     <script>
         const CSV_FILE_PATH = 'data.csv';
 
+        // ヘルプボタン
+        document.getElementById('btn-help').addEventListener('click', function() {
+            const modal = document.getElementById('welcome-modal');
+            const btnAgree = document.getElementById('btn-agree');
+            modal.style.display = 'flex';
+            btnAgree.innerText = "閉じる";
+        });
+
         // 地図初期化
         const map = L.map('map', {
             zoomControl: false,
             attributionControl: false 
-        }).setView([38.2682, 140.8694], 12); // 初期位置：仙台
+        }).setView([38.2682, 140.8694], 12);
 
         L.control.attribution({ position: 'topright' }).addTo(map);
         L.control.zoom({ position: 'topright' }).addTo(map);
@@ -226,26 +238,18 @@
                         address: row['住所'] || row['所在地'] || '',
                         disaster: row['避難対象の災害'] || ''
                     })).filter(d => !isNaN(d.lat) && !isNaN(d.lng));
-
-                    if(allCsvData.length > 0) {
-                        // データ読み込み成功
-                    }
-                },
-                error: (err) => {
-                    console.error("CSV Loading Error:", err);
                 }
             });
         });
 
         // 現在地検索
         document.getElementById('btn-current').addEventListener('click', function() {
-            // データの有無チェック
             if (allCsvData.length === 0) {
-                alert("データの読み込みが完了していないか、失敗しました。\n\n【注意】\nHTMLファイルを直接ダブルクリックで開くと動作しません。\nWebサーバー機能(Live Server等)を使って開いてください。");
+                alert("データの読み込みが完了していません。サーバー経由で開いているか確認してください。");
                 return;
             }
 
-            if(!navigator.geolocation) return alert("このブラウザは位置情報に対応していません。");
+            if(!navigator.geolocation) return alert("位置情報に対応していません。");
             
             const btn = this;
             const originalText = btn.innerText;
@@ -278,9 +282,7 @@
                     btn.disabled = false;
                 },
                 (err) => {
-                    let msg = "位置情報を取得できませんでした。";
-                    if (err.code === 1) msg = "位置情報の利用が許可されていません。";
-                    alert(msg);
+                    alert("位置情報の取得に失敗しました。利用を許可してください。");
                     btn.innerText = originalText;
                     btn.disabled = false;
                 }
@@ -334,7 +336,12 @@
             routingControl = L.Routing.control({
                 waypoints: [ L.latLng(start.lat, start.lng), L.latLng(end.lat, end.lng) ],
                 router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
-                lineOptions: { styles: [{color: '#0066ff', opacity: 0.7, weight: 6}] },
+                // ★線のスタイルを赤色の点線に変更
+                lineOptions: { 
+                    styles: [
+                        { color: '#ff0000', opacity: 0.8, weight: 6, dashArray: '10, 10' } 
+                    ] 
+                },
                 createMarker: () => null,
                 addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: true
             }).addTo(map);
